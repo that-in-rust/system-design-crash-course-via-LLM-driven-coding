@@ -1,0 +1,954 @@
+openapi: 3.1.0
+
+info:
+  title: The Marauder's Map API
+  version: 1.0.0
+  description: |
+    Dark incident tracking system API - shared contract across all three implementations.
+
+    ## The Three Houses
+    - **🦁 Gryffindor**: React + Express (http://localhost:4001)
+    - **🐍 Slytherin**: Angular + .NET (http://localhost:4002)
+    - **🦅 Ravenclaw**: Spring Boot + Java (http://localhost:4003)
+
+    All three implementations share the same PostgreSQL database and implement this exact API contract.
+
+  contact:
+    name: Hogwarts Ministry API Team
+    email: api@hogwarts.edu
+
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:4001
+    description: Gryffindor (Express)
+  - url: http://localhost:4002
+    description: Slytherin (.NET)
+  - url: http://localhost:4003
+    description: Ravenclaw (Spring Boot)
+
+tags:
+  - name: Authentication
+    description: User registration, login, and token management
+  - name: Incidents
+    description: CRUD operations for incident reports
+  - name: Comments
+    description: Discussion threads on incidents
+  - name: Analytics
+    description: Dashboards, charts, and performance metrics
+  - name: Notifications
+    description: User notifications and alerts
+  - name: Health
+    description: System health and monitoring
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access token obtained from /api/auth/login
+
+  schemas:
+    # =========================================================================
+    # Core Domain Models
+    # =========================================================================
+
+    User:
+      type: object
+      required:
+        - id
+        - email
+        - role
+        - firstName
+        - lastName
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        email:
+          type: string
+          format: email
+          example: "harry.potter@hogwarts.edu"
+        role:
+          $ref: '#/components/schemas/UserRole'
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: "Harry"
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 100
+          example: "Potter"
+        house:
+          $ref: '#/components/schemas/HouseName'
+        avatarUrl:
+          type: string
+          format: uri
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        lastLoginAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    Incident:
+      type: object
+      required:
+        - id
+        - title
+        - severity
+        - location
+        - status
+        - reportedBy
+        - reportedAt
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 42
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: "Dark Mark over Hogwarts"
+        description:
+          type: string
+          nullable: true
+          example: "Multiple witnesses report seeing the Dark Mark in the sky above the castle."
+        severity:
+          $ref: '#/components/schemas/SeverityLevel'
+        location:
+          $ref: '#/components/schemas/LocationType'
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        reportedBy:
+          $ref: '#/components/schemas/User'
+        reportedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        resolvedBy:
+          allOf:
+            - $ref: '#/components/schemas/User'
+            - nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+          example: ["investigation", "urgent"]
+        evidenceUrls:
+          type: array
+          items:
+            type: string
+            format: uri
+        witnessCount:
+          type: integer
+          minimum: 0
+          example: 3
+
+    Comment:
+      type: object
+      required:
+        - id
+        - incidentId
+        - user
+        - content
+        - createdAt
+      properties:
+        id:
+          type: integer
+          format: int64
+        incidentId:
+          type: integer
+          format: int64
+        user:
+          $ref: '#/components/schemas/User'
+        content:
+          type: string
+          minLength: 1
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        type:
+          $ref: '#/components/schemas/NotificationType'
+        title:
+          type: string
+        message:
+          type: string
+        incidentId:
+          type: integer
+          format: int64
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        readAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    # =========================================================================
+    # Enums
+    # =========================================================================
+
+    UserRole:
+      type: string
+      enum:
+        - STUDENT
+        - PREFECT
+        - AUROR
+      description: |
+        - `STUDENT`: Can view MISCHIEF incidents only
+        - `PREFECT`: Can view/manage up to DANGEROUS
+        - `AUROR`: Full access including UNFORGIVABLE
+
+    HouseName:
+      type: string
+      enum:
+        - GRYFFINDOR
+        - SLYTHERIN
+        - RAVENCLAW
+        - HUFFLEPUFF
+      nullable: true
+
+    SeverityLevel:
+      type: string
+      enum:
+        - MISCHIEF
+        - SUSPICIOUS
+        - DANGEROUS
+        - UNFORGIVABLE
+      description: |
+        - `MISCHIEF`: Minor rule breaking, pranks
+        - `SUSPICIOUS`: Questionable behavior worth monitoring
+        - `DANGEROUS`: Serious threat requiring immediate attention
+        - `UNFORGIVABLE`: Dark magic, highest severity
+
+    LocationType:
+      type: string
+      enum:
+        - HOGWARTS
+        - HOGSMEADE
+        - KNOCKTURN_ALLEY
+        - FORBIDDEN_FOREST
+        - MINISTRY
+        - AZKABAN
+        - DIAGON_ALLEY
+        - PLATFORM_9_3_4
+
+    IncidentStatus:
+      type: string
+      enum:
+        - OPEN
+        - IN_PROGRESS
+        - RESOLVED
+        - ARCHIVED
+
+    NotificationType:
+      type: string
+      enum:
+        - INCIDENT_CREATED
+        - INCIDENT_ESCALATED
+        - INCIDENT_RESOLVED
+        - COMMENT_ADDED
+        - MENTION
+
+    # =========================================================================
+    # Request/Response DTOs
+    # =========================================================================
+
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - firstName
+        - lastName
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+          pattern: '^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$'
+          description: Must contain uppercase, lowercase, number, and special character
+        firstName:
+          type: string
+          minLength: 1
+        lastName:
+          type: string
+          minLength: 1
+        role:
+          $ref: '#/components/schemas/UserRole'
+        house:
+          $ref: '#/components/schemas/HouseName'
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        rememberMe:
+          type: boolean
+          default: false
+
+    LoginResponse:
+      type: object
+      required:
+        - accessToken
+        - user
+      properties:
+        accessToken:
+          type: string
+          description: JWT access token (1 hour expiry)
+        refreshToken:
+          type: string
+          description: Refresh token (30 days expiry)
+        user:
+          $ref: '#/components/schemas/User'
+
+    CreateIncidentRequest:
+      type: object
+      required:
+        - title
+        - severity
+        - location
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+        severity:
+          $ref: '#/components/schemas/SeverityLevel'
+        location:
+          $ref: '#/components/schemas/LocationType'
+        tags:
+          type: array
+          items:
+            type: string
+
+    UpdateIncidentRequest:
+      type: object
+      properties:
+        severity:
+          $ref: '#/components/schemas/SeverityLevel'
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        description:
+          type: string
+
+    PaginatedIncidents:
+      type: object
+      required:
+        - data
+        - total
+        - page
+        - limit
+        - hasMore
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Incident'
+        total:
+          type: integer
+          description: Total count of incidents matching filters
+        page:
+          type: integer
+          minimum: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        hasMore:
+          type: boolean
+
+    AnalyticsOverview:
+      type: object
+      properties:
+        totalIncidents30d:
+          type: integer
+        openIncidents:
+          type: integer
+        inProgressIncidents:
+          type: integer
+        resolvedIncidents:
+          type: integer
+        avgResolutionHours:
+          type: number
+          format: float
+        mostCommonLocation:
+          $ref: '#/components/schemas/LocationType'
+        severityBreakdown:
+          type: object
+          properties:
+            mischief:
+              type: integer
+            suspicious:
+              type: integer
+            dangerous:
+              type: integer
+            unforgivable:
+              type: integer
+
+    LeaderboardEntry:
+      type: object
+      properties:
+        rank:
+          type: integer
+        fullName:
+          type: string
+        house:
+          $ref: '#/components/schemas/HouseName'
+        incidentsResolved:
+          type: integer
+        avgResolutionHours:
+          type: number
+          format: float
+        totalPoints:
+          type: integer
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              example: "VALIDATION_ERROR"
+            message:
+              type: string
+              example: "Title is required"
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+
+# =============================================================================
+# API PATHS
+# =============================================================================
+
+paths:
+  # ===========================================================================
+  # Authentication
+  # ===========================================================================
+
+  /api/auth/register:
+    post:
+      tags: [Authentication]
+      summary: Register new user
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Email already exists
+
+  /api/auth/login:
+    post:
+      tags: [Authentication]
+      summary: Login user
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh access token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          description: New tokens issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  accessToken:
+                    type: string
+                  refreshToken:
+                    type: string
+        '401':
+          description: Invalid or expired refresh token
+
+  /api/auth/logout:
+    post:
+      tags: [Authentication]
+      summary: Logout user
+      operationId: logoutUser
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Logout successful
+
+  # ===========================================================================
+  # Incidents
+  # ===========================================================================
+
+  /api/incidents:
+    get:
+      tags: [Incidents]
+      summary: List incidents with filtering and pagination
+      operationId: listIncidents
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: search
+          in: query
+          description: Full-text search on title, description, location
+          schema:
+            type: string
+        - name: severity
+          in: query
+          description: Filter by severity (comma-separated)
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/SeverityLevel'
+          style: form
+          explode: false
+        - name: location
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/LocationType'
+          style: form
+          explode: false
+        - name: status
+          in: query
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/IncidentStatus'
+          style: form
+          explode: false
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [reportedAt, severity, status]
+            default: reportedAt
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedIncidents'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Insufficient permissions
+
+    post:
+      tags: [Incidents]
+      summary: Create new incident
+      operationId: createIncident
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIncidentRequest'
+      responses:
+        '201':
+          description: Incident created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '400':
+          description: Validation error
+        '401':
+          description: Unauthenticated
+
+  /api/incidents/{id}:
+    get:
+      tags: [Incidents]
+      summary: Get incident by ID
+      operationId: getIncident
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '404':
+          description: Incident not found
+        '403':
+          description: Insufficient permissions
+
+    patch:
+      tags: [Incidents]
+      summary: Update incident
+      operationId: updateIncident
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIncidentRequest'
+      responses:
+        '200':
+          description: Updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: Incident not found
+
+    delete:
+      tags: [Incidents]
+      summary: Delete incident (soft delete)
+      operationId: deleteIncident
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Deleted successfully
+        '403':
+          description: Insufficient permissions (AUROR only)
+        '404':
+          description: Incident not found
+
+  # ===========================================================================
+  # Comments
+  # ===========================================================================
+
+  /api/incidents/{id}/comments:
+    get:
+      tags: [Comments]
+      summary: Get comments for incident
+      operationId: listComments
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Comment'
+
+    post:
+      tags: [Comments]
+      summary: Add comment to incident
+      operationId: createComment
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+      responses:
+        '201':
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+
+  # ===========================================================================
+  # Analytics
+  # ===========================================================================
+
+  /api/analytics/overview:
+    get:
+      tags: [Analytics]
+      summary: Get analytics dashboard overview
+      operationId: getAnalyticsOverview
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsOverview'
+
+  /api/analytics/leaderboard:
+    get:
+      tags: [Analytics]
+      summary: Get performance leaderboard
+      operationId: getLeaderboard
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: house
+          in: query
+          description: Filter by house
+          schema:
+            $ref: '#/components/schemas/HouseName'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LeaderboardEntry'
+
+  # ===========================================================================
+  # Notifications
+  # ===========================================================================
+
+  /api/notifications:
+    get:
+      tags: [Notifications]
+      summary: Get user's notifications
+      operationId: listNotifications
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: unreadOnly
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Notification'
+
+  /api/notifications/{id}/read:
+    post:
+      tags: [Notifications]
+      summary: Mark notification as read
+      operationId: markNotificationRead
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '204':
+          description: Marked as read
+
+  # ===========================================================================
+  # Health
+  # ===========================================================================
+
+  /health:
+    get:
+      tags: [Health]
+      summary: Basic liveness check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness check with dependencies
+      operationId: readinessCheck
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ready]
+                  database:
+                    type: string
+                    enum: [connected, degraded]
+                  redis:
+                    type: string
+                    enum: [connected, disconnected]
+        '503':
+          description: Service not ready

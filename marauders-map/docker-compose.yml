@@ -1,0 +1,99 @@
+# ============================================================================
+# The Marauder's Map - Docker Compose Configuration
+# ============================================================================
+# "I solemnly swear that I am up to no good"
+# One database, three implementations, endless learning
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # Gringotts Vault - Shared PostgreSQL Database
+  # ==========================================================================
+  gringotts:
+    image: postgres:16-alpine
+    container_name: marauders-gringotts
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: marauders_map
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      # Application user will be created by init.sql
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./gringotts/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - gringotts-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d marauders_map"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - marauders-network
+
+  # ==========================================================================
+  # Gryffindor Wing - React + Express (Year 1)
+  # ==========================================================================
+  # Uncomment when frontend is ready:
+  # gryffindor-client:
+  #   build:
+  #     context: ./gryffindor/client
+  #     dockerfile: Dockerfile
+  #   container_name: marauders-gryffindor-client
+  #   ports:
+  #     - "3001:3001"
+  #   environment:
+  #     - REACT_APP_API_URL=http://localhost:4001
+  #   depends_on:
+  #     - gryffindor-server
+  #   networks:
+  #     - marauders-network
+
+  # gryffindor-server:
+  #   build:
+  #     context: ./gryffindor/server
+  #     dockerfile: Dockerfile
+  #   container_name: marauders-gryffindor-server
+  #   ports:
+  #     - "4001:4001"
+  #   environment:
+  #     - PORT=4001
+  #     - NODE_ENV=production
+  #     - DB_HOST=gringotts
+  #     - DB_PORT=5432
+  #     - DB_NAME=marauders_map
+  #     - DB_USER=marauders_app
+  #     - DB_PASSWORD=change_this_password
+  #     - JWT_SECRET=${GRYFFINDOR_JWT_SECRET:-gryffindor-secret}
+  #   depends_on:
+  #     gringotts:
+  #       condition: service_healthy
+  #   networks:
+  #     - marauders-network
+
+  # ==========================================================================
+  # Slytherin Wing - Angular + .NET (Year 1+)
+  # ==========================================================================
+  # TODO: Add Slytherin services
+
+  # ==========================================================================
+  # Ravenclaw Wing - Spring Boot + Java (Year 1+)
+  # ==========================================================================
+  # TODO: Add Ravenclaw services
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  gringotts-data:
+    name: marauders-gringotts-data
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  marauders-network:
+    name: marauders-network
+    driver: bridge
