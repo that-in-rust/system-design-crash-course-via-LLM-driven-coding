@@ -377,7 +377,7 @@ export async function verifyAccessTokenAndReturnPayload(token) {
 }
 
 // ============================================================================
-// Phase 6: Token Refresh & Logout (TODO)
+// Phase 6: Token Refresh & Logout
 // ============================================================================
 
 /**
@@ -386,21 +386,128 @@ export async function verifyAccessTokenAndReturnPayload(token) {
  * @param {string} refreshToken - JWT refresh token
  * @returns {Promise<Object>} - { accessToken, refreshToken } (rotated)
  * @throws {Error} - If refresh token invalid or revoked
+ *
+ * Security notes:
+ * - Implements refresh token rotation (best practice)
+ * - Verifies token signature and expiration
+ * - Checks revocation status in database
+ * - Invalidates old refresh token after use
+ * - Issues new refresh token with new jti
+ *
+ * Example:
+ * const { accessToken, refreshToken } = await refreshAccessTokenWithRefreshToken(oldRefreshToken);
  */
 export async function refreshAccessTokenWithRefreshToken(refreshToken) {
-  // TODO: Phase 6 implementation
-  throw new Error('Not implemented yet - Phase 6');
+  try {
+    // Step 1: Verify the refresh token signature and expiration
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      throw new Error('JWT_SECRET environment variable not set');
+    }
+
+    // jwt.verify throws if expired or invalid signature
+    const payload = jwt.verify(refreshToken, jwtSecret);
+
+    // Step 2: Validate token type
+    if (payload.type !== 'refresh') {
+      throw new Error('Invalid token type - expected refresh token');
+    }
+
+    // Step 3: Check if token exists and is not revoked in database
+    const tokenCheck = await pool.query(
+      `SELECT user_id, is_revoked, expires_at
+       FROM refresh_tokens
+       WHERE token_hash = $1`,
+      [payload.jti]
+    );
+
+    if (tokenCheck.rows.length === 0) {
+      throw new Error('Refresh token not found in database');
+    }
+
+    const tokenRecord = tokenCheck.rows[0];
+
+    if (tokenRecord.is_revoked) {
+      throw new Error('Refresh token has been revoked');
+    }
+
+    // Step 4: Get user role for access token generation
+    const userQuery = await pool.query(
+      'SELECT role FROM users WHERE id = $1',
+      [payload.userId]
+    );
+
+    if (userQuery.rows.length === 0) {
+      throw new Error('User not found');
+    }
+
+    const userRole = userQuery.rows[0].role;
+
+    // Step 5: Generate new access token
+    const newAccessToken = await generateAccessTokenForUserId(payload.userId, userRole);
+
+    // Step 6: Generate new refresh token (rotation)
+    const newRefreshToken = await generateRefreshTokenForUserId(payload.userId);
+
+    // Decode new refresh token to get jti and expiry
+    const newRefreshDecoded = jwt.decode(newRefreshToken);
+    const newExpiresAt = new Date(newRefreshDecoded.exp * 1000);
+
+    // Step 7: Store new refresh token in database
+    await storeRefreshTokenInDatabase(payload.userId, newRefreshDecoded.jti, newExpiresAt);
+
+    // Step 8: Revoke old refresh token (mark as used)
+    await revokeRefreshTokenInDatabase(payload.jti);
+
+    // Step 9: Return new tokens
+    return {
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken
+    };
+
+  } catch (error) {
+    // jwt.verify throws specific errors - preserve them
+    console.error('Error refreshing access token:', error.message);
+    throw error; // Re-throw to let caller handle
+  }
 }
 
 /**
  * Revoke refresh token in database (logout)
  *
- * @param {string} tokenJti - JWT ID to revoke
+ * @param {string} tokenJti - JWT ID (jti claim) to revoke
  * @returns {Promise<void>}
+ *
+ * Security notes:
+ * - Marks token as revoked without deleting (audit trail)
+ * - Gracefully handles non-existent tokens (no-op)
+ * - Used during logout and token rotation
+ * - Revoked tokens cannot be used to refresh access tokens
+ *
+ * Example:
+ * await revokeRefreshTokenInDatabase('user123_1234567890_abc123');
  */
 export async function revokeRefreshTokenInDatabase(tokenJti) {
-  // TODO: Phase 6 implementation
-  throw new Error('Not implemented yet - Phase 6');
+  try {
+    // Update token to mark as revoked
+    // Note: We don't delete - we keep for audit trail
+    const result = await pool.query(
+      `UPDATE refresh_tokens
+       SET is_revoked = TRUE
+       WHERE token_hash = $1`,
+      [tokenJti]
+    );
+
+    // Graceful handling: No error if token doesn't exist
+    // This is intentional - logout should succeed even with invalid token
+    // (User might be logging out with already-expired/invalid token)
+
+    return; // Success (void return)
+
+  } catch (error) {
+    console.error('Error revoking refresh token:', error.message);
+    throw error;
+  }
 }
 
 // ============================================================================

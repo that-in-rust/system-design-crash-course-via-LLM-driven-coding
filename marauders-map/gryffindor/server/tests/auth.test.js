@@ -19,7 +19,9 @@ import {
   generateRefreshTokenForUserId,
   storeRefreshTokenInDatabase,
   loginUserWithEmailPassword,
-  verifyAccessTokenAndReturnPayload
+  verifyAccessTokenAndReturnPayload,
+  refreshAccessTokenWithRefreshToken,
+  revokeRefreshTokenInDatabase
 } from '../src/services/authenticationService.js';
 
 // ============================================================================
@@ -730,6 +732,233 @@ describe('Phase 5: Token Verification', () => {
       // Assert - Should verify successfully but payload.type should be 'refresh'
       expect(payload.type).toBe('refresh');
       // Note: In production, middleware should check type === 'access'
+    });
+  });
+});
+
+// ============================================================================
+// Test Suite: Phase 6 - Token Refresh & Logout
+// ============================================================================
+
+describe('Phase 6: Token Refresh & Logout', () => {
+  const testUserId = '223e4567-e89b-12d3-a456-426614174006';
+  const testUserRole = 'STUDENT';
+
+  // Clean up database connections after all Phase 6 tests
+  afterAll(async () => {
+    // Clean up test refresh tokens if database is available
+    try {
+      await pool.query(
+        'DELETE FROM refresh_tokens WHERE user_id = $1',
+        [testUserId]
+      );
+    } catch (error) {
+      // Database not available, skip cleanup
+    }
+    await pool.end();
+  });
+
+  // ==========================================================================
+  // Refresh Token Rotation
+  // ==========================================================================
+
+  describe('refreshAccessTokenWithRefreshToken', () => {
+    it('should_issue_new_access_token_with_valid_refresh_token', async () => {
+      // Arrange - Generate a valid refresh token
+      const originalRefreshToken = await generateRefreshTokenForUserId(testUserId);
+      const originalDecoded = jwt.decode(originalRefreshToken);
+      const expiresAt = new Date(originalDecoded.exp * 1000);
+
+      // Store it in database (simulating login)
+      await storeRefreshTokenInDatabase(testUserId, originalDecoded.jti, expiresAt);
+
+      // Act - Refresh the access token
+      const result = await refreshAccessTokenWithRefreshToken(originalRefreshToken);
+
+      // Assert
+      expect(result).toBeDefined();
+      expect(result.accessToken).toBeDefined();
+      expect(result.refreshToken).toBeDefined();
+
+      // Verify new access token is valid
+      const accessPayload = await verifyAccessTokenAndReturnPayload(result.accessToken);
+      expect(accessPayload.userId).toBe(testUserId);
+      expect(accessPayload.type).toBe('access');
+    });
+
+    it('should_rotate_refresh_token_on_use', async () => {
+      // Arrange - Generate and store refresh token
+      const originalRefreshToken = await generateRefreshTokenForUserId(testUserId);
+      const originalDecoded = jwt.decode(originalRefreshToken);
+      const expiresAt = new Date(originalDecoded.exp * 1000);
+      await storeRefreshTokenInDatabase(testUserId, originalDecoded.jti, expiresAt);
+
+      // Act - Use refresh token
+      const result = await refreshAccessTokenWithRefreshToken(originalRefreshToken);
+
+      // Assert - Should return NEW refresh token (rotation)
+      expect(result.refreshToken).toBeDefined();
+      expect(result.refreshToken).not.toBe(originalRefreshToken);
+
+      // Decode and verify new refresh token has different jti
+      const newDecoded = jwt.decode(result.refreshToken);
+      expect(newDecoded.jti).not.toBe(originalDecoded.jti);
+      expect(newDecoded.userId).toBe(testUserId);
+    });
+
+    it('should_reject_expired_refresh_token', async () => {
+      // Arrange - Create expired refresh token
+      const jwtSecret = process.env.JWT_SECRET;
+      const expiredRefreshToken = jwt.sign(
+        {
+          userId: testUserId,
+          type: 'refresh',
+          jti: `${testUserId}_expired_${Date.now()}`
+        },
+        jwtSecret,
+        { expiresIn: '-1s' } // Already expired
+      );
+
+      // Act & Assert
+      await expect(
+        refreshAccessTokenWithRefreshToken(expiredRefreshToken)
+      ).rejects.toThrow('jwt expired');
+    });
+
+    it('should_reject_revoked_refresh_token', async () => {
+      // Arrange - Generate refresh token, store it, then revoke it
+      const refreshToken = await generateRefreshTokenForUserId(testUserId);
+      const decoded = jwt.decode(refreshToken);
+      const expiresAt = new Date(decoded.exp * 1000);
+
+      // Store token
+      await storeRefreshTokenInDatabase(testUserId, decoded.jti, expiresAt);
+
+      // Revoke token
+      await revokeRefreshTokenInDatabase(decoded.jti);
+
+      // Act & Assert - Should reject revoked token
+      await expect(
+        refreshAccessTokenWithRefreshToken(refreshToken)
+      ).rejects.toThrow('Refresh token has been revoked');
+    });
+
+    it('should_reject_invalid_refresh_token', async () => {
+      // Arrange - Create token with wrong secret
+      const wrongSecret = 'wrong-secret-key';
+      const invalidToken = jwt.sign(
+        {
+          userId: testUserId,
+          type: 'refresh',
+          jti: `${testUserId}_invalid_${Date.now()}`
+        },
+        wrongSecret,
+        { expiresIn: '7d' }
+      );
+
+      // Act & Assert
+      await expect(
+        refreshAccessTokenWithRefreshToken(invalidToken)
+      ).rejects.toThrow('invalid signature');
+    });
+
+    it('should_update_token_expiry_on_rotation', async () => {
+      // Arrange - Generate and store refresh token
+      const originalRefreshToken = await generateRefreshTokenForUserId(testUserId);
+      const originalDecoded = jwt.decode(originalRefreshToken);
+      const expiresAt = new Date(originalDecoded.exp * 1000);
+      await storeRefreshTokenInDatabase(testUserId, originalDecoded.jti, expiresAt);
+
+      // Wait 1 second to ensure timestamps differ
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Act - Refresh token
+      const result = await refreshAccessTokenWithRefreshToken(originalRefreshToken);
+
+      // Assert - New token should have later expiry
+      const newDecoded = jwt.decode(result.refreshToken);
+      expect(newDecoded.exp).toBeGreaterThan(originalDecoded.exp);
+
+      // Should be approximately 7 days from now
+      const nowInSeconds = Math.floor(Date.now() / 1000);
+      const expectedExpiry = nowInSeconds + (7 * 24 * 60 * 60); // 7 days
+      expect(newDecoded.exp).toBeGreaterThanOrEqual(expectedExpiry - 10);
+      expect(newDecoded.exp).toBeLessThanOrEqual(expectedExpiry + 10);
+    });
+  });
+
+  // ==========================================================================
+  // Logout (Token Revocation)
+  // ==========================================================================
+
+  describe('revokeRefreshTokenInDatabase', () => {
+    it('should_revoke_refresh_token_on_logout', async () => {
+      // Arrange - Generate and store refresh token
+      const refreshToken = await generateRefreshTokenForUserId(testUserId);
+      const decoded = jwt.decode(refreshToken);
+      const expiresAt = new Date(decoded.exp * 1000);
+      await storeRefreshTokenInDatabase(testUserId, decoded.jti, expiresAt);
+
+      // Act - Revoke token (logout)
+      await revokeRefreshTokenInDatabase(decoded.jti);
+
+      // Assert - Query database to verify token is marked as revoked
+      const result = await pool.query(
+        'SELECT is_revoked FROM refresh_tokens WHERE token_hash = $1',
+        [decoded.jti]
+      );
+
+      expect(result.rows.length).toBe(1);
+      expect(result.rows[0].is_revoked).toBe(true);
+    });
+
+    it('should_return_success_even_with_invalid_token', async () => {
+      // Arrange - Use non-existent token jti
+      const nonExistentJti = 'non-existent-jti-12345';
+
+      // Act - Should not throw even if token doesn't exist
+      await expect(
+        revokeRefreshTokenInDatabase(nonExistentJti)
+      ).resolves.not.toThrow();
+    });
+
+    it('should_mark_token_as_revoked_in_database', async () => {
+      // Arrange - Generate and store refresh token
+      const refreshToken = await generateRefreshTokenForUserId(testUserId);
+      const decoded = jwt.decode(refreshToken);
+      const expiresAt = new Date(decoded.exp * 1000);
+      await storeRefreshTokenInDatabase(testUserId, decoded.jti, expiresAt);
+
+      // Verify initially not revoked
+      const beforeResult = await pool.query(
+        'SELECT is_revoked FROM refresh_tokens WHERE token_hash = $1',
+        [decoded.jti]
+      );
+      expect(beforeResult.rows[0].is_revoked).toBe(false);
+
+      // Act - Revoke
+      await revokeRefreshTokenInDatabase(decoded.jti);
+
+      // Assert - Now revoked
+      const afterResult = await pool.query(
+        'SELECT is_revoked FROM refresh_tokens WHERE token_hash = $1',
+        [decoded.jti]
+      );
+      expect(afterResult.rows[0].is_revoked).toBe(true);
+    });
+
+    it('should_prevent_use_of_revoked_refresh_token', async () => {
+      // Arrange - Generate, store, and revoke refresh token
+      const refreshToken = await generateRefreshTokenForUserId(testUserId);
+      const decoded = jwt.decode(refreshToken);
+      const expiresAt = new Date(decoded.exp * 1000);
+      await storeRefreshTokenInDatabase(testUserId, decoded.jti, expiresAt);
+      await revokeRefreshTokenInDatabase(decoded.jti);
+
+      // Act & Assert - Should reject when trying to refresh with revoked token
+      await expect(
+        refreshAccessTokenWithRefreshToken(refreshToken)
+      ).rejects.toThrow('Refresh token has been revoked');
     });
   });
 });
