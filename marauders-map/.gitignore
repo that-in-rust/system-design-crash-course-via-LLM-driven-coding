@@ -41,3 +41,8 @@ temp/
 
 # Docker volumes
 docker-compose.override.yml
+
+# Parseltongue analyzer
+parseltongue
+parseltongue-*
+parseltongue*/
