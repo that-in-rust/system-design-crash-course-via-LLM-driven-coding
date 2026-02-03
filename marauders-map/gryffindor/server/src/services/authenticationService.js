@@ -335,19 +335,45 @@ export async function loginUserWithEmailPassword(email, password) {
 }
 
 // ============================================================================
-// Phase 5: Token Verification (TODO)
+// Phase 5: Token Verification
 // ============================================================================
 
 /**
  * Verify JWT access token and return payload
  *
  * @param {string} token - JWT access token
- * @returns {Promise<Object>} - Decoded token payload { userId, role }
+ * @param {string} password - Plain password
+ * @returns {Promise<Object>} - Decoded token payload { userId, role, type, iat, exp }
  * @throws {Error} - If token invalid, expired, or tampered
+ *
+ * Security notes:
+ * - Verifies signature using JWT_SECRET
+ * - Checks expiration automatically
+ * - Throws on invalid/tampered tokens
+ * - Returns full payload including metadata
  */
 export async function verifyAccessTokenAndReturnPayload(token) {
-  // TODO: Phase 5 implementation
-  throw new Error('Not implemented yet - Phase 5');
+  try {
+    // Get JWT secret from environment
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      throw new Error('JWT_SECRET environment variable not set');
+    }
+
+    // Verify token signature and expiration
+    const payload = jwt.verify(token, jwtSecret);
+
+    // Return decoded payload
+    return payload;
+
+  } catch (error) {
+    // jwt.verify throws specific errors:
+    // - TokenExpiredError: 'jwt expired'
+    // - JsonWebTokenError: 'invalid signature', 'jwt malformed', etc.
+    // - NotBeforeError: 'jwt not active'
+    console.error('Error verifying access token:', error.message);
+    throw error; // Re-throw with original error message
+  }
 }
 
 // ============================================================================

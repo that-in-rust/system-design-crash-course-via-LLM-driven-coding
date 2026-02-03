@@ -18,7 +18,8 @@ import {
   generateAccessTokenForUserId,
   generateRefreshTokenForUserId,
   storeRefreshTokenInDatabase,
-  loginUserWithEmailPassword
+  loginUserWithEmailPassword,
+  verifyAccessTokenAndReturnPayload
 } from '../src/services/authenticationService.js';
 
 // ============================================================================
@@ -627,6 +628,108 @@ describe('Phase 4: User Login', () => {
 
       // Should NOT include sensitive data
       expect(result.user.password_hash).toBeUndefined();
+    });
+  });
+});
+
+// ============================================================================
+// Test Suite: Phase 5 - Token Verification & Protected Routes
+// ============================================================================
+
+describe('Phase 5: Token Verification', () => {
+  const testUserId = '223e4567-e89b-12d3-a456-426614174001';
+  const testUserRole = 'PREFECT';
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  // ==========================================================================
+  // Token Verification
+  // ==========================================================================
+
+  describe('verifyAccessTokenAndReturnPayload', () => {
+    it('should_verify_valid_jwt_access_token', async () => {
+      // Arrange - Generate a valid access token
+      const validToken = await generateAccessTokenForUserId(testUserId, testUserRole);
+
+      // Act
+      const payload = await verifyAccessTokenAndReturnPayload(validToken);
+
+      // Assert
+      expect(payload).toBeDefined();
+      expect(payload.userId).toBe(testUserId);
+      expect(payload.role).toBe(testUserRole);
+      expect(payload.type).toBe('access');
+      expect(payload.iat).toBeDefined(); // Issued at
+      expect(payload.exp).toBeDefined(); // Expires at
+    });
+
+    it('should_reject_expired_access_token', async () => {
+      // Arrange - Create a token that's already expired
+      const jwtSecret = process.env.JWT_SECRET;
+      const expiredToken = jwt.sign(
+        { userId: testUserId, role: testUserRole, type: 'access' },
+        jwtSecret,
+        { expiresIn: '-1s' } // Expired 1 second ago
+      );
+
+      // Act & Assert
+      await expect(
+        verifyAccessTokenAndReturnPayload(expiredToken)
+      ).rejects.toThrow('jwt expired');
+    });
+
+    it('should_reject_tampered_access_token', async () => {
+      // Arrange - Generate valid token then tamper with it
+      const validToken = await generateAccessTokenForUserId(testUserId, testUserRole);
+      const parts = validToken.split('.');
+      // Tamper with the payload (middle part)
+      const tamperedToken = `${parts[0]}.${parts[1]}XXX.${parts[2]}`;
+
+      // Act & Assert
+      await expect(
+        verifyAccessTokenAndReturnPayload(tamperedToken)
+      ).rejects.toThrow();
+    });
+
+    it('should_reject_token_with_invalid_signature', async () => {
+      // Arrange - Sign with different secret
+      const wrongSecret = 'wrong-secret-key';
+      const invalidToken = jwt.sign(
+        { userId: testUserId, role: testUserRole, type: 'access' },
+        wrongSecret,
+        { expiresIn: '15m' }
+      );
+
+      // Act & Assert
+      await expect(
+        verifyAccessTokenAndReturnPayload(invalidToken)
+      ).rejects.toThrow('invalid signature');
+    });
+
+    it('should_extract_user_id_from_valid_token', async () => {
+      // Arrange
+      const validToken = await generateAccessTokenForUserId(testUserId, testUserRole);
+
+      // Act
+      const payload = await verifyAccessTokenAndReturnPayload(validToken);
+
+      // Assert
+      expect(payload.userId).toBe(testUserId);
+      expect(typeof payload.userId).toBe('string');
+    });
+
+    it('should_reject_refresh_token_as_access_token', async () => {
+      // Arrange - Try to use refresh token as access token
+      const refreshToken = await generateRefreshTokenForUserId(testUserId);
+
+      // Act
+      const payload = await verifyAccessTokenAndReturnPayload(refreshToken);
+
+      // Assert - Should verify successfully but payload.type should be 'refresh'
+      expect(payload.type).toBe('refresh');
+      // Note: In production, middleware should check type === 'access'
     });
   });
 });

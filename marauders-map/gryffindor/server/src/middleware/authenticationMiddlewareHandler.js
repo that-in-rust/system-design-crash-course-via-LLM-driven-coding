@@ -1,57 +1,96 @@
 // ============================================================================
 // Authentication Middleware Handler
 // ============================================================================
-// Year 1: Mock authentication (always allow)
-// Year 2: Implement real JWT authentication
+// Year 2: Real JWT authentication with token verification
 // Following pattern: 4-word naming convention
 // ============================================================================
 
+import { verifyAccessTokenAndReturnPayload } from '../services/authenticationService.js';
+
 /**
- * Mock authentication middleware
- * In Year 1, we accept any request with an Authorization header
- * In Year 2, this will validate JWT tokens
+ * Authentication middleware - verify JWT access tokens
+ *
+ * Validates JWT tokens and attaches user payload to request object.
+ * Replaces Year 1 mock authentication with real JWT verification.
  *
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  * @param {Function} next - Express next middleware function
+ *
+ * Security:
+ * - Verifies JWT signature
+ * - Checks token expiration
+ * - Validates token type (should be 'access')
+ * - Attaches payload to req.user for downstream use
  */
-export function authenticateRequestWithJwtToken(req, res, next) {
-  // Check for Authorization header
-  const authHeader = req.headers.authorization;
+export async function authenticateRequestWithJwtToken(req, res, next) {
+  try {
+    // Check for Authorization header
+    const authHeader = req.headers.authorization;
 
-  if (!authHeader) {
+    if (!authHeader) {
+      return res.status(401).json({
+        error: 'Authorization header required',
+        message: 'Please provide an Authorization header'
+      });
+    }
+
+    // Extract token (format: "Bearer <token>")
+    const parts = authHeader.split(' ');
+
+    if (parts.length !== 2 || parts[0] !== 'Bearer') {
+      return res.status(401).json({
+        error: 'Invalid authorization format',
+        message: 'Expected format: Bearer <token>'
+      });
+    }
+
+    const token = parts[1];
+
+    // Year 2: Real JWT verification
+    const payload = await verifyAccessTokenAndReturnPayload(token);
+
+    // Optional: Verify token type is 'access' (not 'refresh')
+    if (payload.type !== 'access') {
+      return res.status(401).json({
+        error: 'Invalid token type',
+        message: 'Access token required, got: ' + payload.type
+      });
+    }
+
+    // Attach user data to request for downstream middleware/handlers
+    req.user = {
+      userId: payload.userId,
+      role: payload.role,
+      // Include token metadata for auditing if needed
+      tokenIssuedAt: payload.iat,
+      tokenExpiresAt: payload.exp
+    };
+
+    next();
+
+  } catch (error) {
+    // Handle JWT verification errors
+    if (error.message === 'jwt expired') {
+      return res.status(401).json({
+        error: 'Token expired',
+        message: 'Your session has expired. Please log in again.'
+      });
+    }
+
+    if (error.message === 'invalid signature') {
+      return res.status(401).json({
+        error: 'Invalid token',
+        message: 'Token signature verification failed'
+      });
+    }
+
+    // Generic error for other JWT issues
     return res.status(401).json({
-      error: 'Authorization header required',
-      message: 'Please provide an Authorization header'
+      error: 'Authentication failed',
+      message: 'Invalid or malformed token'
     });
   }
-
-  // For Year 1: Accept any token
-  // Extract token (format: "Bearer <token>")
-  const token = authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({
-      error: 'Invalid authorization format',
-      message: 'Expected format: Bearer <token>'
-    });
-  }
-
-  // Year 1: Mock user (Harry Potter from seed data)
-  // In Year 2, we'll decode the JWT and get real user data
-  req.user = {
-    // This UUID matches Harry Potter from init.sql seed data
-    // We'll query the database to get the actual UUID in a moment
-    id: null, // Will be set by looking up Harry Potter
-    email: 'harry.potter@hogwarts.edu',
-    role: 'AUROR'
-  };
-
-  // TODO Year 2: Replace with real JWT validation
-  // const decoded = jwt.verify(token, process.env.JWT_SECRET);
-  // req.user = decoded;
-
-  next();
 }
 
 /**
