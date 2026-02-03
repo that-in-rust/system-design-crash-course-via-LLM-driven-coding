@@ -257,7 +257,7 @@ export async function storeRefreshTokenInDatabase(userId, tokenJti, expiresAt) {
 }
 
 // ============================================================================
-// Phase 4: User Login (TODO)
+// Phase 4: User Login
 // ============================================================================
 
 /**
@@ -269,8 +269,69 @@ export async function storeRefreshTokenInDatabase(userId, tokenJti, expiresAt) {
  * @throws {Error} - If credentials invalid
  */
 export async function loginUserWithEmailPassword(email, password) {
-  // TODO: Phase 4 implementation
-  throw new Error('Not implemented yet - Phase 4');
+  try {
+    // Validation: Required fields
+    if (!email) {
+      throw new Error('Email is required');
+    }
+    if (!password) {
+      throw new Error('Password is required');
+    }
+
+    // Normalize email
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Query user by email
+    const result = await pool.query(
+      `SELECT id, email, password_hash, first_name, last_name, role, house,
+              created_at, updated_at
+       FROM users
+       WHERE email = $1`,
+      [normalizedEmail]
+    );
+
+    // Check if user exists
+    if (result.rows.length === 0) {
+      throw new Error('Invalid email or password');
+    }
+
+    const user = result.rows[0];
+
+    // Verify password using bcrypt
+    const isPasswordValid = await comparePasswordWithStoredHash(
+      password,
+      user.password_hash
+    );
+
+    if (!isPasswordValid) {
+      throw new Error('Invalid email or password');
+    }
+
+    // Generate tokens
+    const accessToken = await generateAccessTokenForUserId(user.id, user.role);
+    const refreshToken = await generateRefreshTokenForUserId(user.id);
+
+    // Decode refresh token to get jti and expiry
+    const refreshDecoded = jwt.decode(refreshToken);
+    const expiresAt = new Date(refreshDecoded.exp * 1000);
+
+    // Store refresh token in database
+    await storeRefreshTokenInDatabase(user.id, refreshDecoded.jti, expiresAt);
+
+    // Remove password_hash from user object before returning
+    delete user.password_hash;
+
+    // Return user profile and tokens
+    return {
+      user: user,
+      accessToken: accessToken,
+      refreshToken: refreshToken
+    };
+
+  } catch (error) {
+    console.error('Error during login:', error.message);
+    throw error;
+  }
 }
 
 // ============================================================================

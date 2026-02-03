@@ -17,7 +17,8 @@ import {
   registerUserWithEmailPassword,
   generateAccessTokenForUserId,
   generateRefreshTokenForUserId,
-  storeRefreshTokenInDatabase
+  storeRefreshTokenInDatabase,
+  loginUserWithEmailPassword
 } from '../src/services/authenticationService.js';
 
 // ============================================================================
@@ -472,6 +473,160 @@ describe('Phase 3: JWT Token Generation', () => {
         expiresAt.getTime(),
         -3 // Within 1 second (10^-3)
       );
+    });
+  });
+});
+
+// ============================================================================
+// Test Suite: Phase 4 - User Login
+// ============================================================================
+
+describe('Phase 4: User Login', () => {
+  // Test user credentials
+  const testEmail = 'login.test@hogwarts.edu';
+  const testPassword = 'LoginPass123!';
+  const testFirstName = 'Login';
+  const testLastName = 'Test';
+
+  // Register a test user before tests
+  beforeAll(async () => {
+    // Clean up any existing test user
+    await pool.query(
+      "DELETE FROM users WHERE email = $1",
+      [testEmail]
+    );
+
+    // Register test user for login tests
+    await registerUserWithEmailPassword(testEmail, testPassword, testFirstName, testLastName);
+  });
+
+  // Cleanup after all tests
+  afterAll(async () => {
+    await pool.query(
+      "DELETE FROM users WHERE email = $1",
+      [testEmail]
+    );
+    await pool.end();
+  });
+
+  // ==========================================================================
+  // Successful Login
+  // ==========================================================================
+
+  describe('loginUserWithEmailPassword', () => {
+    it('should_login_user_with_valid_credentials', async () => {
+      // Act
+      const result = await loginUserWithEmailPassword(testEmail, testPassword);
+
+      // Assert
+      expect(result).toBeDefined();
+      expect(result.user).toBeDefined();
+      expect(result.user.email).toBe(testEmail);
+      expect(result.user.first_name).toBe(testFirstName);
+      expect(result.user.last_name).toBe(testLastName);
+      expect(result.user.password_hash).toBeUndefined(); // Never return password
+    });
+
+    it('should_return_access_and_refresh_tokens', async () => {
+      // Act
+      const result = await loginUserWithEmailPassword(testEmail, testPassword);
+
+      // Assert
+      expect(result.accessToken).toBeDefined();
+      expect(result.refreshToken).toBeDefined();
+      expect(typeof result.accessToken).toBe('string');
+      expect(typeof result.refreshToken).toBe('string');
+
+      // Verify token format (JWT has 3 parts)
+      expect(result.accessToken.split('.').length).toBe(3);
+      expect(result.refreshToken.split('.').length).toBe(3);
+
+      // Decode and verify payload
+      const accessDecoded = jwt.decode(result.accessToken);
+      const refreshDecoded = jwt.decode(result.refreshToken);
+
+      expect(accessDecoded.userId).toBeDefined();
+      expect(accessDecoded.role).toBeDefined();
+      expect(accessDecoded.type).toBe('access');
+
+      expect(refreshDecoded.userId).toBeDefined();
+      expect(refreshDecoded.type).toBe('refresh');
+      expect(refreshDecoded.jti).toBeDefined();
+    });
+
+    it('should_reject_login_with_invalid_password', async () => {
+      // Arrange
+      const wrongPassword = 'WrongPassword123!';
+
+      // Act & Assert
+      await expect(
+        loginUserWithEmailPassword(testEmail, wrongPassword)
+      ).rejects.toThrow('Invalid email or password');
+    });
+
+    it('should_reject_login_with_nonexistent_email', async () => {
+      // Arrange
+      const nonexistentEmail = 'nonexistent@hogwarts.edu';
+
+      // Act & Assert
+      await expect(
+        loginUserWithEmailPassword(nonexistentEmail, testPassword)
+      ).rejects.toThrow('Invalid email or password');
+    });
+
+    it('should_create_refresh_token_in_database', async () => {
+      // Act
+      const result = await loginUserWithEmailPassword(testEmail, testPassword);
+
+      // Assert - Check refresh token is stored
+      const refreshDecoded = jwt.decode(result.refreshToken);
+      const dbResult = await pool.query(
+        'SELECT * FROM refresh_tokens WHERE token_hash = $1',
+        [refreshDecoded.jti]
+      );
+
+      expect(dbResult.rows.length).toBe(1);
+      expect(dbResult.rows[0].is_revoked).toBe(false);
+    });
+
+    it('should_include_user_role_in_token_payload', async () => {
+      // Act
+      const result = await loginUserWithEmailPassword(testEmail, testPassword);
+
+      // Assert
+      const accessDecoded = jwt.decode(result.accessToken);
+      expect(accessDecoded.role).toBe('STUDENT'); // Default role
+    });
+
+    it('should_reject_login_without_credentials', async () => {
+      // Act & Assert - Missing email
+      await expect(
+        loginUserWithEmailPassword(null, testPassword)
+      ).rejects.toThrow('Email is required');
+
+      // Act & Assert - Missing password
+      await expect(
+        loginUserWithEmailPassword(testEmail, null)
+      ).rejects.toThrow('Password is required');
+    });
+
+    it('should_return_user_profile_on_successful_login', async () => {
+      // Act
+      const result = await loginUserWithEmailPassword(testEmail, testPassword);
+
+      // Assert - User object structure
+      expect(result.user).toBeDefined();
+      expect(result.user.id).toBeDefined(); // UUID
+      expect(result.user.email).toBe(testEmail);
+      expect(result.user.first_name).toBe(testFirstName);
+      expect(result.user.last_name).toBe(testLastName);
+      expect(result.user.role).toBe('STUDENT');
+      expect(result.user.house).toBeDefined(); // May be null initially
+      expect(result.user.created_at).toBeDefined();
+      expect(result.user.updated_at).toBeDefined();
+
+      // Should NOT include sensitive data
+      expect(result.user.password_hash).toBeUndefined();
     });
   });
 });
