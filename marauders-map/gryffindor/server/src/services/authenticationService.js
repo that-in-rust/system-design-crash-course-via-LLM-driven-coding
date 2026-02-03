@@ -511,7 +511,7 @@ export async function revokeRefreshTokenInDatabase(tokenJti) {
 }
 
 // ============================================================================
-// Phase 7: Password Management (TODO)
+// Phase 7: Password Management
 // ============================================================================
 
 /**
@@ -522,8 +522,76 @@ export async function revokeRefreshTokenInDatabase(tokenJti) {
  * @param {string} newPassword - New password (min 8 chars)
  * @returns {Promise<void>}
  * @throws {Error} - If old password incorrect or validation fails
+ *
+ * Security notes:
+ * - Requires old password verification (prevents session hijacking password changes)
+ * - Validates new password strength (min 8 characters)
+ * - Prevents password reuse (new ≠ old)
+ * - Hashes new password with bcrypt before storing
+ * - Generic error messages for security
+ *
+ * Example:
+ * await changeUserPasswordWithVerification(userId, 'OldPass123!', 'NewPass456!');
  */
 export async function changeUserPasswordWithVerification(userId, oldPassword, newPassword) {
-  // TODO: Phase 7 implementation
-  throw new Error('Not implemented yet - Phase 7');
+  try {
+    // Validation: Required fields
+    if (!userId) {
+      throw new Error('User ID is required');
+    }
+    if (!oldPassword) {
+      throw new Error('Current password is required');
+    }
+    if (!newPassword) {
+      throw new Error('New password is required');
+    }
+
+    // Validation: New password strength (min 8 characters)
+    if (newPassword.length < 8) {
+      throw new Error('New password must be at least 8 characters');
+    }
+
+    // Validation: New password must be different from old password
+    if (oldPassword === newPassword) {
+      throw new Error('New password must be different from current password');
+    }
+
+    // Step 1: Get user and current password hash from database
+    const userResult = await pool.query(
+      'SELECT password_hash FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      throw new Error('User not found');
+    }
+
+    const currentPasswordHash = userResult.rows[0].password_hash;
+
+    // Step 2: Verify old password
+    const isOldPasswordValid = await comparePasswordWithStoredHash(
+      oldPassword,
+      currentPasswordHash
+    );
+
+    if (!isOldPasswordValid) {
+      throw new Error('Current password is incorrect');
+    }
+
+    // Step 3: Hash new password
+    const newPasswordHash = await hashPasswordWithBcryptSalt(newPassword);
+
+    // Step 4: Update password hash in database
+    await pool.query(
+      'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [newPasswordHash, userId]
+    );
+
+    // Success - no return value (void)
+    return;
+
+  } catch (error) {
+    console.error('Error changing password:', error.message);
+    throw error; // Re-throw to let caller handle
+  }
 }

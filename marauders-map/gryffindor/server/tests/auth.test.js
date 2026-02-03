@@ -21,7 +21,8 @@ import {
   loginUserWithEmailPassword,
   verifyAccessTokenAndReturnPayload,
   refreshAccessTokenWithRefreshToken,
-  revokeRefreshTokenInDatabase
+  revokeRefreshTokenInDatabase,
+  changeUserPasswordWithVerification
 } from '../src/services/authenticationService.js';
 
 // ============================================================================
@@ -959,6 +960,200 @@ describe('Phase 6: Token Refresh & Logout', () => {
       await expect(
         refreshAccessTokenWithRefreshToken(refreshToken)
       ).rejects.toThrow('Refresh token has been revoked');
+    });
+  });
+});
+
+// ============================================================================
+// Test Suite: Phase 7 - Password Management
+// ============================================================================
+
+describe('Phase 7: Password Management', () => {
+  const testUserId = '223e4567-e89b-12d3-a456-426614174007';
+  const testEmail = 'hermione.granger@hogwarts.edu';
+  const testPassword = 'OldPassword123!';
+  const newPassword = 'NewPassword456!';
+
+  // Setup: Create test user before running tests
+  beforeAll(async () => {
+    try {
+      // Clean up any existing test user
+      await pool.query('DELETE FROM users WHERE email = $1', [testEmail]);
+
+      // Create test user with known password
+      const passwordHash = await hashPasswordWithBcryptSalt(testPassword);
+      await pool.query(
+        `INSERT INTO users (id, email, password_hash, first_name, last_name, role)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [testUserId, testEmail, passwordHash, 'Hermione', 'Granger', 'PREFECT']
+      );
+    } catch (error) {
+      // Database not available, tests will be skipped
+      console.log('Database not available for Phase 7 tests');
+    }
+  });
+
+  // Clean up after all Phase 7 tests
+  afterAll(async () => {
+    try {
+      await pool.query('DELETE FROM users WHERE id = $1', [testUserId]);
+    } catch (error) {
+      // Database not available, skip cleanup
+    }
+    await pool.end();
+  });
+
+  // ==========================================================================
+  // Password Change
+  // ==========================================================================
+
+  describe('changeUserPasswordWithVerification', () => {
+    it('should_change_password_with_correct_old_password', async () => {
+      // Arrange - User exists with testPassword
+
+      // Act - Change password
+      await changeUserPasswordWithVerification(testUserId, testPassword, newPassword);
+
+      // Assert - Query database and verify new password hash works
+      const result = await pool.query(
+        'SELECT password_hash FROM users WHERE id = $1',
+        [testUserId]
+      );
+
+      expect(result.rows.length).toBe(1);
+      const newHash = result.rows[0].password_hash;
+
+      // Verify new password works
+      const isNewPasswordValid = await comparePasswordWithStoredHash(newPassword, newHash);
+      expect(isNewPasswordValid).toBe(true);
+
+      // Verify old password no longer works
+      const isOldPasswordValid = await comparePasswordWithStoredHash(testPassword, newHash);
+      expect(isOldPasswordValid).toBe(false);
+
+      // Reset password for next test
+      const resetHash = await hashPasswordWithBcryptSalt(testPassword);
+      await pool.query(
+        'UPDATE users SET password_hash = $1 WHERE id = $2',
+        [resetHash, testUserId]
+      );
+    });
+
+    it('should_reject_incorrect_old_password', async () => {
+      // Arrange - User exists with testPassword
+      const wrongOldPassword = 'WrongPassword999!';
+
+      // Act & Assert - Should reject with wrong old password
+      await expect(
+        changeUserPasswordWithVerification(testUserId, wrongOldPassword, newPassword)
+      ).rejects.toThrow('Current password is incorrect');
+    });
+
+    it('should_validate_new_password_length', async () => {
+      // Arrange - New password too short (< 8 chars)
+      const shortPassword = 'Short1!';
+
+      // Act & Assert
+      await expect(
+        changeUserPasswordWithVerification(testUserId, testPassword, shortPassword)
+      ).rejects.toThrow('New password must be at least 8 characters');
+    });
+
+    it('should_hash_new_password_before_storing', async () => {
+      // Arrange
+      const anotherNewPassword = 'AnotherNew789!';
+
+      // Act
+      await changeUserPasswordWithVerification(testUserId, testPassword, anotherNewPassword);
+
+      // Assert - Query database and verify password is hashed (not plaintext)
+      const result = await pool.query(
+        'SELECT password_hash FROM users WHERE id = $1',
+        [testUserId]
+      );
+
+      const storedHash = result.rows[0].password_hash;
+
+      // Hash should NOT equal plaintext password
+      expect(storedHash).not.toBe(anotherNewPassword);
+
+      // Hash should start with bcrypt prefix
+      expect(storedHash).toMatch(/^\$2[aby]\$/);
+
+      // Hash should be 60 characters (bcrypt standard)
+      expect(storedHash.length).toBe(60);
+
+      // Reset password for next test
+      const resetHash = await hashPasswordWithBcryptSalt(testPassword);
+      await pool.query(
+        'UPDATE users SET password_hash = $1 WHERE id = $2',
+        [resetHash, testUserId]
+      );
+    });
+
+    it('should_update_password_hash_in_database', async () => {
+      // Arrange - Get initial password hash
+      const beforeResult = await pool.query(
+        'SELECT password_hash FROM users WHERE id = $1',
+        [testUserId]
+      );
+      const oldHash = beforeResult.rows[0].password_hash;
+
+      // Act - Change password
+      await changeUserPasswordWithVerification(testUserId, testPassword, newPassword);
+
+      // Assert - Hash should be different
+      const afterResult = await pool.query(
+        'SELECT password_hash FROM users WHERE id = $1',
+        [testUserId]
+      );
+      const newHash = afterResult.rows[0].password_hash;
+
+      expect(newHash).not.toBe(oldHash);
+
+      // Reset password for next test
+      const resetHash = await hashPasswordWithBcryptSalt(testPassword);
+      await pool.query(
+        'UPDATE users SET password_hash = $1 WHERE id = $2',
+        [resetHash, testUserId]
+      );
+    });
+
+    it('should_not_accept_same_password', async () => {
+      // Arrange - Try to change password to the same password
+      const samePassword = testPassword;
+
+      // Act & Assert - Should reject same password
+      await expect(
+        changeUserPasswordWithVerification(testUserId, testPassword, samePassword)
+      ).rejects.toThrow('New password must be different from current password');
+    });
+
+    it('should_require_all_parameters', async () => {
+      // Act & Assert - Missing userId
+      await expect(
+        changeUserPasswordWithVerification(null, testPassword, newPassword)
+      ).rejects.toThrow('User ID is required');
+
+      // Act & Assert - Missing oldPassword
+      await expect(
+        changeUserPasswordWithVerification(testUserId, null, newPassword)
+      ).rejects.toThrow('Current password is required');
+
+      // Act & Assert - Missing newPassword
+      await expect(
+        changeUserPasswordWithVerification(testUserId, testPassword, null)
+      ).rejects.toThrow('New password is required');
+    });
+
+    it('should_verify_user_exists', async () => {
+      // Arrange - Non-existent user ID
+      const nonExistentUserId = '00000000-0000-0000-0000-000000000000';
+
+      // Act & Assert - Should reject for non-existent user
+      await expect(
+        changeUserPasswordWithVerification(nonExistentUserId, testPassword, newPassword)
+      ).rejects.toThrow('User not found');
     });
   });
 });
