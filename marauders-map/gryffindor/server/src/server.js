@@ -10,6 +10,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { testDatabaseConnectionStatus } from './db/connectionPoolManager.js';
+import authRouteHandler from './routes/authRouteHandler.js';
 import incidentsRouteHandler from './routes/incidentsRouteHandler.js';
 
 // Load environment variables
@@ -64,13 +65,18 @@ app.get('/', (req, res) => {
   res.status(200).json({
     message: 'Welcome to The Marauder\'s Map - Gryffindor Wing',
     motto: 'I solemnly swear that I am up to no good',
+    version: '2.0.0',
     endpoints: {
       health: '/health',
+      auth: '/api/auth',
       incidents: '/api/incidents'
     },
     documentation: '/api/docs'
   });
 });
+
+// Mount auth routes (Year 2: Authentication & Authorization)
+app.use('/api/auth', authRouteHandler);
 
 // Mount incidents routes
 app.use('/api/incidents', incidentsRouteHandler);
@@ -84,7 +90,7 @@ app.use((req, res) => {
   res.status(404).json({
     error: 'Not Found',
     message: `Route ${req.method} ${req.path} not found`,
-    suggestion: 'Try /health or /api/incidents'
+    suggestion: 'Try /health, /api/auth, or /api/incidents'
   });
 });
 
@@ -123,12 +129,13 @@ async function startServerWithDatabaseConnection() {
     server = app.listen(PORT, () => {
       console.log('');
       console.log('='.repeat(60));
-      console.log('🦁  GRYFFINDOR WING - THE MARAUDER\'S MAP');
+      console.log('🦁  GRYFFINDOR WING - THE MARAUDER\'S MAP v2.0.0');
       console.log('='.repeat(60));
       console.log(`📡 Server running on port ${PORT}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
       console.log(`🔗 API Base URL: http://localhost:${PORT}`);
       console.log(`💚 Health Check: http://localhost:${PORT}/health`);
+      console.log(`🔐 Auth API: http://localhost:${PORT}/api/auth`);
       console.log(`📋 Incidents API: http://localhost:${PORT}/api/incidents`);
       console.log('='.repeat(60));
       console.log('"I solemnly swear that I am up to no good."');

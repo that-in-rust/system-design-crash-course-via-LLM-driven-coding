@@ -23,19 +23,6 @@ router.use(authenticateRequestWithJwtToken);
 // ============================================================================
 
 /**
- * Get user ID from email (Year 1 workaround since we're mocking auth)
- * @param {string} email - User email
- * @returns {Promise<string|null>} User UUID
- */
-async function getUserIdFromEmailAddress(email) {
-  const result = await pool.query(
-    'SELECT id FROM users WHERE email = $1',
-    [email]
-  );
-  return result.rows[0]?.id || null;
-}
-
-/**
  * Validate severity enum value
  * @param {string} severity - Severity level to validate
  * @returns {boolean} Is valid severity
@@ -97,14 +84,8 @@ router.post('/', async (req, res) => {
       });
     }
 
-    // Get user ID (Year 1: from mocked user)
-    const userId = await getUserIdFromEmailAddress(req.user.email);
-
-    if (!userId) {
-      return res.status(500).json({
-        error: 'Failed to resolve user ID'
-      });
-    }
+    // Get user ID from authenticated request (Year 2: from JWT)
+    const userId = req.user.userId;
 
     // Insert incident
     const result = await pool.query(
@@ -349,8 +330,8 @@ router.delete('/:id', async (req, res) => {
       });
     }
 
-    // Get user ID
-    const userId = await getUserIdFromEmailAddress(req.user.email);
+    // Get user ID from authenticated request (Year 2: from JWT)
+    const userId = req.user.userId;
 
     // Check if incident exists and is not already resolved
     const checkResult = await pool.query(
