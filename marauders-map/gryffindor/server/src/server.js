@@ -12,6 +12,10 @@ import dotenv from 'dotenv';
 import { testDatabaseConnectionStatus } from './db/connectionPoolManager.js';
 import authRouteHandler from './routes/authRouteHandler.js';
 import incidentsRouteHandler from './routes/incidentsRouteHandler.js';
+import {
+  initializeSocketServerWithHttpServer,
+  startPresenceSessionCleanupScheduler
+} from './websocket/socketServer.js';
 
 // Load environment variables
 dotenv.config();
@@ -65,11 +69,17 @@ app.get('/', (req, res) => {
   res.status(200).json({
     message: 'Welcome to The Marauder\'s Map - Gryffindor Wing',
     motto: 'I solemnly swear that I am up to no good',
-    version: '2.0.0',
+    version: '3.0.0',
+    features: {
+      year1: 'Core CRUD Operations',
+      year2: 'Authentication & Authorization (JWT)',
+      year3: 'Real-Time Features (WebSockets)'
+    },
     endpoints: {
       health: '/health',
       auth: '/api/auth',
-      incidents: '/api/incidents'
+      incidents: '/api/incidents',
+      websocket: 'ws://localhost:' + (process.env.PORT || 4001)
     },
     documentation: '/api/docs'
   });
@@ -129,7 +139,7 @@ async function startServerWithDatabaseConnection() {
     server = app.listen(PORT, () => {
       console.log('');
       console.log('='.repeat(60));
-      console.log('🦁  GRYFFINDOR WING - THE MARAUDER\'S MAP v2.0.0');
+      console.log('🦁  GRYFFINDOR WING - THE MARAUDER\'S MAP v3.0.0');
       console.log('='.repeat(60));
       console.log(`📡 Server running on port ${PORT}`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
@@ -140,6 +150,15 @@ async function startServerWithDatabaseConnection() {
       console.log('='.repeat(60));
       console.log('"I solemnly swear that I am up to no good."');
       console.log('='.repeat(60));
+      console.log('');
+
+      // Initialize Socket.io server (Year 3: Real-time features)
+      initializeSocketServerWithHttpServer(server);
+
+      // Start presence session cleanup scheduler
+      startPresenceSessionCleanupScheduler();
+
+      console.log('🔌 WebSocket server ready');
       console.log('');
     });
 

@@ -578,6 +578,147 @@ END $$;
 SELECT refresh_analytics();
 
 -- =============================================================================
+-- YEAR 3: REAL-TIME FEATURES - SCHEMA ADDITIONS
+-- =============================================================================
+
+-- ============================================================================
+-- TABLE: notifications
+-- Purpose: Store in-app notifications for users (mentions, assignments, etc.)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL CHECK (type IN ('mention', 'assignment', 'escalation', 'resolution', 'comment')),
+    message TEXT NOT NULL,
+    link TEXT,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    read_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Indexes for performance
+CREATE INDEX idx_notifications_user_id ON notifications(user_id);
+CREATE INDEX idx_notifications_is_read ON notifications(is_read);
+CREATE INDEX idx_notifications_created_at ON notifications(created_at DESC);
+CREATE INDEX idx_notifications_user_unread ON notifications(user_id, is_read) WHERE is_read = FALSE;
+
+COMMENT ON TABLE notifications IS 'Year 3: In-app notifications for real-time user alerts';
+COMMENT ON COLUMN notifications.type IS 'Notification type: mention, assignment, escalation, resolution, comment';
+COMMENT ON COLUMN notifications.link IS 'Deep link to relevant page (e.g., /incidents/123)';
+COMMENT ON COLUMN notifications.is_read IS 'Whether user has seen this notification';
+
+-- ============================================================================
+-- TABLE: presence_sessions
+-- Purpose: Track active WebSocket connections and user presence
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS presence_sessions (
+    socket_id VARCHAR(255) PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    connected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    last_seen TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    current_room VARCHAR(255)
+);
+
+-- Indexes for presence queries
+CREATE INDEX idx_presence_user_id ON presence_sessions(user_id);
+CREATE INDEX idx_presence_last_seen ON presence_sessions(last_seen);
+CREATE INDEX idx_presence_current_room ON presence_sessions(current_room) WHERE current_room IS NOT NULL;
+
+COMMENT ON TABLE presence_sessions IS 'Year 3: Active WebSocket connections for presence tracking';
+COMMENT ON COLUMN presence_sessions.socket_id IS 'Unique Socket.io connection ID';
+COMMENT ON COLUMN presence_sessions.current_room IS 'Current Socket.io room (e.g., incident:uuid-123)';
+COMMENT ON COLUMN presence_sessions.last_seen IS 'Heartbeat timestamp for stale connection cleanup';
+
+-- ============================================================================
+-- FUNCTION: cleanup_stale_presence_sessions
+-- Purpose: Remove presence sessions older than 5 minutes (disconnected clients)
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION cleanup_stale_presence_sessions()
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM presence_sessions
+    WHERE last_seen < NOW() - INTERVAL '5 minutes';
+
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION cleanup_stale_presence_sessions IS 'Year 3: Cleanup stale WebSocket sessions (call periodically)';
+
+-- ============================================================================
+-- FUNCTION: get_online_users_by_role
+-- Purpose: Get count of online users grouped by role
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION get_online_users_by_role()
+RETURNS TABLE(role user_role, count BIGINT) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT u.role, COUNT(DISTINCT ps.user_id)
+    FROM presence_sessions ps
+    JOIN users u ON ps.user_id = u.id
+    WHERE ps.last_seen > NOW() - INTERVAL '1 minute'
+    GROUP BY u.role
+    ORDER BY u.role;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION get_online_users_by_role IS 'Year 3: Get online user counts by role (STUDENT, PREFECT, AUROR)';
+
+-- ============================================================================
+-- FUNCTION: get_users_viewing_incident
+-- Purpose: Get list of users currently viewing a specific incident
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION get_users_viewing_incident(p_incident_id BIGINT)
+RETURNS TABLE(
+    user_id UUID,
+    first_name VARCHAR,
+    last_name VARCHAR,
+    role user_role,
+    connected_at TIMESTAMP WITH TIME ZONE
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        u.id,
+        u.first_name,
+        u.last_name,
+        u.role,
+        ps.connected_at
+    FROM presence_sessions ps
+    JOIN users u ON ps.user_id = u.id
+    WHERE ps.current_room = 'incident:' || p_incident_id
+      AND ps.last_seen > NOW() - INTERVAL '1 minute'
+    ORDER BY ps.connected_at;
+END;
+$$ LANGUAGE plpgsql;
+
+COMMENT ON FUNCTION get_users_viewing_incident IS 'Year 3: Get list of users actively viewing an incident page';
+
+-- ============================================================================
+-- SEED DATA: Sample Notifications
+-- ============================================================================
+
+-- Insert sample notifications for testing
+INSERT INTO notifications (user_id, type, message, link, is_read, created_at)
+SELECT
+    u.id,
+    (ARRAY['mention', 'assignment', 'escalation']::VARCHAR[])[floor(random() * 3 + 1)],
+    'Sample notification: ' || (ARRAY['You were mentioned in a comment', 'New incident assigned to you', 'Incident severity escalated']::TEXT[])[floor(random() * 3 + 1)],
+    '/incidents/' || (SELECT id FROM incidents ORDER BY random() LIMIT 1),
+    random() > 0.5,
+    NOW() - (random() * INTERVAL '7 days')
+FROM users u
+LIMIT 20;
+
+-- =============================================================================
 -- GRANTS (adjust as needed for your security model)
 -- =============================================================================
 
@@ -604,14 +745,23 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 -- Verify setup
 DO $$
 BEGIN
-    RAISE NOTICE '=================================================';
+    RAISE NOTICE '===========================================================';
     RAISE NOTICE 'Gringotts Vault initialized successfully!';
-    RAISE NOTICE '=================================================';
-    RAISE NOTICE 'Users created: %', (SELECT COUNT(*) FROM users);
-    RAISE NOTICE 'Incidents created: %', (SELECT COUNT(*) FROM incidents);
-    RAISE NOTICE 'Analytics refreshed: %', (SELECT last_refreshed FROM analytics_overview);
-    RAISE NOTICE '=================================================';
+    RAISE NOTICE '===========================================================';
+    RAISE NOTICE 'YEAR 1: Core CRUD';
+    RAISE NOTICE '  Users created: %', (SELECT COUNT(*) FROM users);
+    RAISE NOTICE '  Incidents created: %', (SELECT COUNT(*) FROM incidents);
+    RAISE NOTICE '  Analytics refreshed: %', (SELECT last_refreshed FROM analytics_overview);
+    RAISE NOTICE '-----------------------------------------------------------';
+    RAISE NOTICE 'YEAR 2: Authentication & Authorization';
+    RAISE NOTICE '  Refresh tokens table: ready';
+    RAISE NOTICE '-----------------------------------------------------------';
+    RAISE NOTICE 'YEAR 3: Real-Time Features';
+    RAISE NOTICE '  Notifications created: %', (SELECT COUNT(*) FROM notifications);
+    RAISE NOTICE '  Presence sessions table: ready';
+    RAISE NOTICE '  WebSocket functions: 3 installed';
+    RAISE NOTICE '===========================================================';
     RAISE NOTICE 'Default password for all users: password';
     RAISE NOTICE 'IMPORTANT: Change these passwords in production!';
-    RAISE NOTICE '=================================================';
+    RAISE NOTICE '===========================================================';
 END $$;
