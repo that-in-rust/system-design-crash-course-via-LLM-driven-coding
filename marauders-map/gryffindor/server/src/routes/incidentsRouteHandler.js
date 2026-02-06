@@ -9,6 +9,11 @@
 import express from 'express';
 import { pool } from '../db/connectionPoolManager.js';
 import { authenticateRequestWithJwtToken } from '../middleware/authenticationMiddlewareHandler.js';
+import {
+  broadcastIncidentCreatedToAllClients,
+  broadcastIncidentUpdatedToRoom,
+  broadcastIncidentResolvedToAll
+} from '../websocket/socketServer.js';
 
 const router = express.Router();
 
@@ -97,6 +102,21 @@ router.post('/', async (req, res) => {
     );
 
     const incident = result.rows[0];
+
+    // Get user info for broadcast (Year 3: Real-time features)
+    const userResult = await pool.query(
+      'SELECT id, first_name, last_name, role FROM users WHERE id = $1',
+      [userId]
+    );
+    const createdBy = userResult.rows[0];
+
+    // Broadcast incident creation to all connected clients (Year 3)
+    broadcastIncidentCreatedToAllClients(incident, {
+      userId: createdBy.id,
+      firstName: createdBy.first_name,
+      lastName: createdBy.last_name,
+      role: createdBy.role
+    });
 
     // Return created incident
     res.status(201).json({
@@ -303,8 +323,25 @@ router.put('/:id', async (req, res) => {
     `;
 
     const result = await pool.query(query, params);
+    const updatedIncident = result.rows[0];
 
-    res.status(200).json(result.rows[0]);
+    // Get user info for broadcast (Year 3: Real-time features)
+    const userId = req.user.userId;
+    const userResult = await pool.query(
+      'SELECT id, first_name, last_name, role FROM users WHERE id = $1',
+      [userId]
+    );
+    const updatedBy = userResult.rows[0];
+
+    // Broadcast incident update to room (Year 3)
+    broadcastIncidentUpdatedToRoom(id, updatedIncident, {
+      userId: updatedBy.id,
+      firstName: updatedBy.first_name,
+      lastName: updatedBy.last_name,
+      role: updatedBy.role
+    });
+
+    res.status(200).json(updatedIncident);
 
   } catch (error) {
     console.error('Error updating incident:', error);
@@ -364,7 +401,24 @@ router.delete('/:id', async (req, res) => {
       [id, userId]
     );
 
-    res.status(200).json(result.rows[0]);
+    const resolvedIncident = result.rows[0];
+
+    // Get user info for broadcast (Year 3: Real-time features)
+    const userResult = await pool.query(
+      'SELECT id, first_name, last_name, role FROM users WHERE id = $1',
+      [userId]
+    );
+    const resolvedBy = userResult.rows[0];
+
+    // Broadcast incident resolution to all clients (Year 3)
+    broadcastIncidentResolvedToAll(id, {
+      userId: resolvedBy.id,
+      firstName: resolvedBy.first_name,
+      lastName: resolvedBy.last_name,
+      role: resolvedBy.role
+    }, `Incident resolved by ${resolvedBy.first_name} ${resolvedBy.last_name}`);
+
+    res.status(200).json(resolvedIncident);
 
   } catch (error) {
     console.error('Error resolving incident:', error);

@@ -12,6 +12,8 @@ import dotenv from 'dotenv';
 import { testDatabaseConnectionStatus } from './db/connectionPoolManager.js';
 import authRouteHandler from './routes/authRouteHandler.js';
 import incidentsRouteHandler from './routes/incidentsRouteHandler.js';
+import notificationsRouteHandler from './routes/notificationsRouteHandler.js';
+import presenceRouteHandler from './routes/presenceRouteHandler.js';
 import {
   initializeSocketServerWithHttpServer,
   startPresenceSessionCleanupScheduler
@@ -73,12 +75,14 @@ app.get('/', (req, res) => {
     features: {
       year1: 'Core CRUD Operations',
       year2: 'Authentication & Authorization (JWT)',
-      year3: 'Real-Time Features (WebSockets)'
+      year3: 'Real-Time Features (WebSockets, Presence, Notifications)'
     },
     endpoints: {
       health: '/health',
       auth: '/api/auth',
       incidents: '/api/incidents',
+      notifications: '/api/notifications',
+      presence: '/api/presence',
       websocket: 'ws://localhost:' + (process.env.PORT || 4001)
     },
     documentation: '/api/docs'
@@ -91,6 +95,12 @@ app.use('/api/auth', authRouteHandler);
 // Mount incidents routes
 app.use('/api/incidents', incidentsRouteHandler);
 
+// Mount notifications routes (Year 3: Real-Time Features)
+app.use('/api/notifications', notificationsRouteHandler);
+
+// Mount presence routes (Year 3: Real-Time Features)
+app.use('/api/presence', presenceRouteHandler);
+
 // ============================================================================
 // Error Handling Middleware
 // ============================================================================
@@ -100,7 +110,7 @@ app.use((req, res) => {
   res.status(404).json({
     error: 'Not Found',
     message: `Route ${req.method} ${req.path} not found`,
-    suggestion: 'Try /health, /api/auth, or /api/incidents'
+    suggestion: 'Try /health, /api/auth, /api/incidents, /api/notifications, or /api/presence'
   });
 });
 
