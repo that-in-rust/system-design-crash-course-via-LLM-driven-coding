@@ -1,10 +1,13 @@
 # Year 6: Advanced Patterns
 ### *"The Magic Behind the Magic"*
 
-**Status**: 📝 Planning Phase
-**Estimated Time**: 10-12 hours per stack
+**Status**: Planning Phase
 **Difficulty**: Advanced
-**Prerequisites**: Years 1-5 complete
+**Prerequisites**: Years 1-5 complete (Year 3.5 Iggy streaming strongly recommended)
+
+> **Note**: Year 3.5 introduced Iggy as the event streaming backbone. Year 6 builds
+> directly on top of it: Ravenclaw's Event Sourcing uses Iggy as the event store,
+> and Slytherin's CQRS uses Iggy as the event bus connecting the write and read sides.
 
 ---
 

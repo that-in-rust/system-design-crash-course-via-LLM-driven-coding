@@ -220,6 +220,18 @@ The project is structured as a 7-year curriculum, progressively building complex
 
 **Time:** 8-10 hours | **Difficulty:** Intermediate
 
+### 📨 Year 3.5: Event Streaming with Iggy
+*"The Owl Post Office - messages that never get lost"*
+
+- Message streaming with Iggy (Rust-based, like Kafka but tiny)
+- Decouple API from WebSocket broadcasting
+- Streams, Topics, Partitions, Offsets
+- Producer/Consumer pattern
+- Event replay for disconnected clients
+- Foundation for CQRS & Event Sourcing (Year 6)
+
+**Difficulty:** Intermediate-Advanced
+
 ### 🔍 Year 4: Search & Filtering
 *"Finding needles in haystacks"*
 
@@ -274,6 +286,7 @@ The project is structured as a 7-year curriculum, progressively building complex
 | [Technical Specifications](./TECHNICAL-SPECS-Marauders-Map.md) | Architecture, database schema, API contract |
 | [OpenAPI Specification](./contracts/openapi.yml) | Complete REST API reference |
 | [Database Schema](./gringotts/init.sql) | PostgreSQL setup with comments |
+| [Year 3.5: Event Streaming](./YEAR-3.5-PLAN.md) | Iggy streaming backbone plan |
 
 ### House-Specific Guides
 
@@ -554,11 +567,13 @@ Special thanks to all contributors who make this project a reality.
 
 ## Project Status
 
-| House | Year 1 | Year 2 | Year 3 | Year 4 | Year 5 | Year 6 | Year 7 |
-|-------|--------|--------|--------|--------|--------|--------|--------|
-| 🦁 Gryffindor | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 🐍 Slytherin | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| 🦅 Ravenclaw | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| House | Year 1 | Year 2 | Year 3 | Year 3.5 | Year 4 | Year 5 | Year 6 | Year 7 |
+|-------|--------|--------|--------|----------|--------|--------|--------|--------|
+| 🦁 Gryffindor | ✅ | ✅ | ✅ | 📝 | 📝 | 📝 | 📝 | 📝 |
+| 🐍 Slytherin | 📝 | 📝 | 📝 | 📝 | 📝 | 📝 | 📝 | 📝 |
+| 🦅 Ravenclaw | 📝 | 📝 | 📝 | 📝 | 📝 | 📝 | 📝 | 📝 |
+
+✅ = Implemented | 📝 = Planned
 
 ---
 
